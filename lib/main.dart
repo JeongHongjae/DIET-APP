@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart'; // 추가
+import 'firebase_options.dart'; // 방금 만든 파일 추가
 
 void main() {
   runApp(const MyApp());
