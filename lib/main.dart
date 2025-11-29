@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart'; // 필수
 import 'firebase_options.dart'; // 필수
-import 'screens/admin_data_screen.dart'; // 현재 관리자 화면
+import 'screens/main_screen.dart';
 
 void main() async { 
   // 비동기 작업을 위해 필수
@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Diet App',
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -42,7 +42,7 @@ class MyApp extends StatelessWidget {
         colorScheme: .fromSeed(seedColor: Colors.deepPurple),
       ),
       //home: const MyHomePage(title: 'Flutter Demo Home Page'),
-      home: const AdminDataScreen(),
+      home: const MainScreen(),
     );
   }
 }
