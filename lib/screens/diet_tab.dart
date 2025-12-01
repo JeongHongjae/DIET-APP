@@ -14,15 +14,20 @@ class DietTab extends StatefulWidget {
 
 class _DietTabState extends State<DietTab> {
   DateTime _selectedDate = DateTime.now();
-  bool _isDetailView = false; // true: 상세(일일), false: 요약(주간)
+  bool _isDetailView = false; 
 
-  final List<String> _favorites = ["현미밥", "달걀"];
+  final List<String> _favorites = ["닭가슴살", "현미밥", "아메리카노", "사과", "계란후라이"];
 
-  // 일일 권장 섭취량 (20대 평균 기준)
+  // ★ [수정] 콜레스테롤 삭제 및 기준치 업데이트
   final Map<String, double> _rdi = {
-    'kcal': 2500, 'carbo': 324, 'protein': 55, 'fat': 54,
-    'vit_c': 100, 'calcium': 700, 'sodium': 2000, 
-    'cholesterol': 300, 'trans_fat': 0,
+    'kcal': 2500, 
+    'carbo': 324, 
+    'protein': 55, 
+    'fat': 54,
+    'vit_c': 100, 
+    'calcium': 700, 
+    'sodium': 2000, 
+    'trans_fat': 0.5, // 트랜스지방 기준치 명시 (0.5g 초과 시 위험)
   };
 
   Map<String, Map<String, String>> _tempMemoImage = {
@@ -40,7 +45,6 @@ class _DietTabState extends State<DietTab> {
   String _getDateString(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
   String get _selectedDateString => _getDateString(_selectedDate);
 
-  // 이번주 월요일 (시간 00:00:00으로 초기화하여 정확도 향상)
   DateTime get _monday {
     DateTime now = DateTime.now();
     DateTime today = DateTime(now.year, now.month, now.day);
@@ -52,7 +56,6 @@ class _DietTabState extends State<DietTab> {
   Widget build(BuildContext context) {
     Query query = FirebaseFirestore.instance.collection('diet_logs');
     
-    // 상세 화면일 땐 '선택된 날짜', 주간 화면일 땐 '이번주 전체' 데이터 로드
     if (_isDetailView) {
       query = query.where('date', isEqualTo: _getDateString(_selectedDate));
     } else {
@@ -104,23 +107,40 @@ class _DietTabState extends State<DietTab> {
   // ==================== 1. 주간 요약 화면 (메인) ====================
 
   Widget _buildSummaryBody(List<QueryDocumentSnapshot> docs) {
-    Map<String, double> dailyKcal = {};
-    // 분석할 영양소 목록 (비타민C 포함)
+    // ★ [수정] 단순 칼로리가 아니라, 날짜별 전체 영양소 집계가 필요함 (별 색깔 판단용)
+    Map<String, Map<String, double>> dailyStats = {};
+    
+    // 주간 누적 (부족 영양소 분석용)
     Map<String, double> weeklyNutrients = {
-      'carbo': 0, 'protein': 0, 'fat': 0, 
-      'vit_c': 0, 'calcium': 0 // ★ 비타민, 칼슘 분석 대상 포함
+      'carbo': 0, 'protein': 0, 'fat': 0, 'vit_c': 0, 'calcium': 0
     };
 
     for (var doc in docs) {
       var data = doc.data() as Map<String, dynamic>;
       String date = data['date'];
-      double k = double.tryParse(data['kcal']?.toString() ?? "0") ?? 0;
-      dailyKcal[date] = (dailyKcal[date] ?? 0) + k;
+      
+      // 날짜별 통계 초기화
+      if (!dailyStats.containsKey(date)) {
+        dailyStats[date] = _initNutrients();
+      }
 
-      weeklyNutrients.forEach((key, val) {
-        weeklyNutrients[key] = val + (double.tryParse(data[key]?.toString() ?? "0") ?? 0);
+      // 영양소 합산
+      _rdi.keys.forEach((key) {
+        double val = double.tryParse(data[key]?.toString() ?? "0") ?? 0;
+        dailyStats[date]![key] = (dailyStats[date]![key] ?? 0) + val;
+        
+        // 주간 누적에도 추가
+        if (weeklyNutrients.containsKey(key)) {
+          weeklyNutrients[key] = (weeklyNutrients[key] ?? 0) + val;
+        }
       });
     }
+
+    // 주간 칼로리 맵 (그래프용)
+    Map<String, double> dailyKcal = {};
+    dailyStats.forEach((key, value) {
+      dailyKcal[key] = value['kcal'] ?? 0;
+    });
 
     return SingleChildScrollView(
       child: Column(
@@ -129,7 +149,7 @@ class _DietTabState extends State<DietTab> {
           const SizedBox(height: 20),
           _buildWeeklyAnalysisCard(dailyKcal, weeklyNutrients),
           const SizedBox(height: 20),
-          _buildDailyList(dailyKcal),
+          _buildDailyList(dailyStats), // ★ 수정된 집계 데이터 전달
         ],
       ),
     );
@@ -182,23 +202,11 @@ class _DietTabState extends State<DietTab> {
             Stack(
               alignment: Alignment.bottomCenter,
               children: [
-                // 배경 바 (회색)
-                Container(
-                  width: 8,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                // ★ [수정] 섭취량 바 (항상 파란색으로 표시)
+                Container(width: 8, height: 80, decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(4))),
                 Container(
                   width: 8,
                   height: 80 * percent,
-                  decoration: BoxDecoration(
-                    color: Colors.blueAccent, // 무조건 파란색 (보이게!)
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+                  decoration: BoxDecoration(color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
                 ),
               ],
             ),
@@ -212,7 +220,6 @@ class _DietTabState extends State<DietTab> {
   }
 
   Widget _buildDeficientNutrients(Map<String, double> weeklyTotal) {
-    // 섭취율 계산
     Map<String, double> percentages = {};
     weeklyTotal.forEach((key, val) {
       if (_rdi.containsKey(key)) {
@@ -220,9 +227,8 @@ class _DietTabState extends State<DietTab> {
       }
     });
 
-    // 섭취율 낮은 순 정렬
     var sortedKeys = percentages.keys.toList()..sort((a, b) => percentages[a]!.compareTo(percentages[b]!));
-    var lacking = sortedKeys.take(3).toList(); // 하위 3개
+    var lacking = sortedKeys.take(3).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,7 +299,8 @@ class _DietTabState extends State<DietTab> {
     );
   }
 
-  Widget _buildDailyList(Map<String, double> dailyKcal) {
+  // ★ [수정] 별 색깔 로직 (건강/비건강 판별)
+  Widget _buildDailyList(Map<String, Map<String, double>> dailyStats) {
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -301,11 +308,36 @@ class _DietTabState extends State<DietTab> {
       itemBuilder: (context, index) {
         DateTime day = _monday.add(Duration(days: index));
         String dateKey = _getDateString(day);
-        double kcal = dailyKcal[dateKey] ?? 0;
+        
+        Map<String, double> nutrients = dailyStats[dateKey] ?? _initNutrients();
+        double kcal = nutrients['kcal'] ?? 0;
+
+        // 1. 별 개수 (칼로리 섭취량 기준)
         int stars = 0;
         if (kcal > _rdi['kcal']! * 0.9) stars = 3;
         else if (kcal > _rdi['kcal']! * 0.6) stars = 2;
         else if (kcal > _rdi['kcal']! * 0.3) stars = 1;
+
+        // 2. ★ 별 색깔 (건강 여부 판단)
+        bool isUnhealthy = false;
+        // 나트륨, 트랜스지방, 탄수화물 과다 섭취
+        if (nutrients['sodium']! > _rdi['sodium']! || 
+            nutrients['trans_fat']! > _rdi['trans_fat']! || 
+            nutrients['carbo']! > _rdi['carbo']!) {
+          isUnhealthy = true;
+        }
+        // 단백질, 비타민C 부족 (별이 3개 다 찼을 때만 엄격하게 체크하거나, 항상 체크)
+        // 여기서는 데이터가 어느정도 찼을때(별1개이상) 부족하면 빨간불로 표시
+        if (stars > 0) {
+           if (nutrients['protein']! < _rdi['protein']! * 0.5 || // 50% 미만이면 부족으로 간주
+               nutrients['vit_c']! < _rdi['vit_c']! * 0.5) {
+             isUnhealthy = true;
+           }
+        }
+
+        Color starColor = isUnhealthy ? Colors.redAccent : Colors.amber;
+        String statusText = isUnhealthy ? "(관리필요)" : "(건강함)";
+        if (stars == 0) statusText = ""; // 기록 없으면 텍스트 없음
 
         return ListTile(
           onTap: () {
@@ -319,10 +351,19 @@ class _DietTabState extends State<DietTab> {
             decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
             child: Text("${day.month}/${day.day}", style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
-          title: Text(DateFormat('EEEE', 'ko_KR').format(day)),
+          title: Row(
+            children: [
+              Text(DateFormat('EEEE', 'ko_KR').format(day)),
+              const SizedBox(width: 8),
+              Text(statusText, style: TextStyle(fontSize: 12, color: starColor, fontWeight: FontWeight.bold)),
+            ],
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
-            children: List.generate(3, (i) => Icon(i < stars ? Icons.star : Icons.star_border, color: Colors.amber, size: 20)),
+            children: List.generate(3, (i) => Icon(
+              i < stars ? Icons.star : Icons.star_border, 
+              color: starColor, size: 20
+            )),
           ),
         );
       },
@@ -398,8 +439,8 @@ class _DietTabState extends State<DietTab> {
           const SizedBox(height: 20),
           _buildMicroNutrientBar("비타민 C", total['vit_c']!, _rdi['vit_c']!, "mg"),
           _buildMicroNutrientBar("나트륨", total['sodium']!, _rdi['sodium']!, "mg", isLimit: true),
-          _buildMicroNutrientBar("콜레스테롤", total['cholesterol']!, _rdi['cholesterol']!, "mg", isLimit: true),
-          _buildMicroNutrientBar("트랜스지방", total['trans_fat']!, 2.0, "g", isLimit: true),
+          // ★ 콜레스테롤 삭제됨
+          _buildMicroNutrientBar("트랜스지방", total['trans_fat']!, _rdi['trans_fat']!, "g", isLimit: true),
         ],
       ),
     );
@@ -422,7 +463,6 @@ class _DietTabState extends State<DietTab> {
           const SizedBox(height: 10),
           Row(
             children: [
-              // ★ [수정] 사진 입력칸 크기 조정 (flex 2)
               Expanded(
                 flex: 2,
                 child: GestureDetector(
@@ -446,7 +486,6 @@ class _DietTabState extends State<DietTab> {
                 ),
               ),
               const SizedBox(width: 15),
-              // ★ [수정] 그래프 칸 크기 조정 (flex 5)
               Expanded(
                 flex: 5,
                 child: Container(
@@ -518,10 +557,11 @@ class _DietTabState extends State<DietTab> {
     );
   }
 
+  // ★ [수정] 콜레스테롤 제거된 초기화 함수
   Map<String, double> _initNutrients() {
     return {
       'kcal': 0, 'carbo': 0, 'protein': 0, 'fat': 0,
-      'vit_c': 0, 'calcium': 0, 'sodium': 0, 'cholesterol': 0, 'trans_fat': 0
+      'vit_c': 0, 'calcium': 0, 'sodium': 0, 'trans_fat': 0
     };
   }
 
@@ -533,7 +573,6 @@ class _DietTabState extends State<DietTab> {
       case 'vit_c': return '비타민C';
       case 'calcium': return '칼슘';
       case 'sodium': return '나트륨';
-      case 'cholesterol': return '콜레스테롤';
       case 'trans_fat': return '트랜스지방';
       default: return key;
     }
@@ -581,7 +620,6 @@ class _DietTabState extends State<DietTab> {
   Widget _buildMiniBar(String label, double val, Color color) {
     return Row(
       children: [
-        // ★ [수정] 텍스트 길이 확보 (40 -> 50)
         SizedBox(width: 50, child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
         Expanded(
           child: LinearProgressIndicator(value: (val / 100).clamp(0.0, 1.0), color: color, backgroundColor: Colors.grey[100], minHeight: 6, borderRadius: BorderRadius.circular(3)),
@@ -694,7 +732,7 @@ class _DietTabState extends State<DietTab> {
       'vit_c': foodData['vit_c'] ?? 0,
       'calcium': foodData['calcium'] ?? 0,
       'sodium': foodData['sodium'] ?? 0,
-      'cholesterol': foodData['cholesterol'] ?? 0,
+      // ★ 콜레스테롤 저장 제외
       'trans_fat': foodData['trans_fat'] ?? 0,
       'timestamp': DateTime.now(),
     });
