@@ -5,6 +5,10 @@ import 'firebase_options.dart';
 import 'providers/user_provider.dart'; 
 import 'screens/survey_screen.dart'; 
 import 'screens/landing_screen.dart';
+import 'providers/survey_provider.dart';
+import 'providers/nutrition_provider.dart';
+import 'providers/party_provider.dart';
+import 'providers/character_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +20,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
+        ChangeNotifierProvider(create: (_) => SurveyProvider()),
       ],
       child: const MyApp(),
     ),

@@ -1,18 +1,722 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
-class DietTab extends StatelessWidget {
+class DietTab extends StatefulWidget {
   const DietTab({super.key});
 
   @override
+  State<DietTab> createState() => _DietTabState();
+}
+
+class _DietTabState extends State<DietTab> {
+  DateTime _selectedDate = DateTime.now();
+  bool _isDetailView = false; // true: 상세(일일), false: 요약(주간)
+
+  final List<String> _favorites = ["닭가슴살", "현미밥", "아메리카노", "사과", "계란후라이"];
+
+  // 일일 권장 섭취량 (20대 평균 기준)
+  final Map<String, double> _rdi = {
+    'kcal': 2500, 'carbo': 324, 'protein': 55, 'fat': 54,
+    'vit_c': 100, 'calcium': 700, 'sodium': 2000, 
+    'cholesterol': 300, 'trans_fat': 0,
+  };
+
+  Map<String, Map<String, String>> _tempMemoImage = {
+    "breakfast": {"memo": "", "image": ""},
+    "lunch": {"memo": "", "image": ""},
+    "dinner": {"memo": "", "image": ""},
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    initializeDateFormatting('ko_KR', null);
+  }
+
+  String _getDateString(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
+  String get _selectedDateString => _getDateString(_selectedDate);
+
+  // 이번주 월요일 (시간 00:00:00으로 초기화하여 정확도 향상)
+  DateTime get _monday {
+    DateTime now = DateTime.now();
+    DateTime today = DateTime(now.year, now.month, now.day);
+    return today.subtract(Duration(days: today.weekday - 1));
+  }
+  DateTime get _sunday => _monday.add(const Duration(days: 6));
+
+  @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: Text(
-          "식단 기록 화면\n(추후 개발 예정)",
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 20, color: Colors.grey),
-        ),
+    Query query = FirebaseFirestore.instance.collection('diet_logs');
+    
+    // 상세 화면일 땐 '선택된 날짜', 주간 화면일 땐 '이번주 전체' 데이터 로드
+    if (_isDetailView) {
+      query = query.where('date', isEqualTo: _getDateString(_selectedDate));
+    } else {
+      query = query
+          .where('date', isGreaterThanOrEqualTo: _getDateString(_monday))
+          .where('date', isLessThanOrEqualTo: _getDateString(_sunday));
+    }
+
+    return Scaffold(
+      appBar: _isDetailView ? _buildDetailAppBar() : _buildSummaryAppBar(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: query.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return const Center(child: Text("데이터 로드 중 오류 발생"));
+          
+          final docs = snapshot.data?.docs ?? [];
+          
+          if (_isDetailView) {
+            return _buildDetailBody(docs);
+          } else {
+            return _buildSummaryBody(docs);
+          }
+        },
       ),
     );
+  }
+
+  PreferredSizeWidget _buildSummaryAppBar() {
+    return AppBar(title: const Text("식단 캘린더 📅"), centerTitle: true);
+  }
+
+  PreferredSizeWidget _buildDetailAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_ios),
+        onPressed: () => setState(() => _isDetailView = false),
+      ),
+      title: Text(DateFormat('MM월 dd일 (E)', 'ko_KR').format(_selectedDate)),
+      centerTitle: true,
+      actions: [
+        TextButton(
+          onPressed: _saveMemoAndImage,
+          child: const Text("저장", style: TextStyle(fontWeight: FontWeight.bold)),
+        )
+      ],
+    );
+  }
+
+  // ==================== 1. 주간 요약 화면 (메인) ====================
+
+  Widget _buildSummaryBody(List<QueryDocumentSnapshot> docs) {
+    Map<String, double> dailyKcal = {};
+    // 분석할 영양소 목록 (비타민C 포함)
+    Map<String, double> weeklyNutrients = {
+      'carbo': 0, 'protein': 0, 'fat': 0, 
+      'vit_c': 0, 'calcium': 0 // ★ 비타민, 칼슘 분석 대상 포함
+    };
+
+    for (var doc in docs) {
+      var data = doc.data() as Map<String, dynamic>;
+      String date = data['date'];
+      double k = double.tryParse(data['kcal']?.toString() ?? "0") ?? 0;
+      dailyKcal[date] = (dailyKcal[date] ?? 0) + k;
+
+      weeklyNutrients.forEach((key, val) {
+        weeklyNutrients[key] = val + (double.tryParse(data[key]?.toString() ?? "0") ?? 0);
+      });
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildWeeklyCalendar(dailyKcal),
+          const SizedBox(height: 20),
+          _buildWeeklyAnalysisCard(dailyKcal, weeklyNutrients),
+          const SizedBox(height: 20),
+          _buildDailyList(dailyKcal),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeeklyAnalysisCard(Map<String, double> dailyKcal, Map<String, double> weeklyNutrients) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("주간 식단 리포트 📊", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 5, child: _buildWeeklyBarGraph(dailyKcal)),
+              const SizedBox(width: 15),
+              Container(width: 1, height: 120, color: Colors.grey[200]),
+              const SizedBox(width: 15),
+              Expanded(flex: 4, child: _buildDeficientNutrients(weeklyNutrients)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeeklyBarGraph(Map<String, double> dailyKcal) {
+    double maxKcal = _rdi['kcal']!;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(7, (index) {
+        DateTime day = _monday.add(Duration(days: index));
+        String dateKey = _getDateString(day);
+        double currentKcal = dailyKcal[dateKey] ?? 0;
+        double percent = (currentKcal / maxKcal).clamp(0.0, 1.0);
+        bool isToday = day.day == DateTime.now().day;
+
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                // 배경 바 (회색)
+                Container(
+                  width: 8,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                // ★ [수정] 섭취량 바 (항상 파란색으로 표시)
+                Container(
+                  width: 8,
+                  height: 80 * percent,
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent, // 무조건 파란색 (보이게!)
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(DateFormat('E', 'ko_KR').format(day),
+                style: TextStyle(fontSize: 10, color: isToday ? Colors.blue : Colors.grey, fontWeight: isToday ? FontWeight.bold : FontWeight.normal)),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _buildDeficientNutrients(Map<String, double> weeklyTotal) {
+    // 섭취율 계산
+    Map<String, double> percentages = {};
+    weeklyTotal.forEach((key, val) {
+      if (_rdi.containsKey(key)) {
+        percentages[key] = val / (_rdi[key]! * 7);
+      }
+    });
+
+    // 섭취율 낮은 순 정렬
+    var sortedKeys = percentages.keys.toList()..sort((a, b) => percentages[a]!.compareTo(percentages[b]!));
+    var lacking = sortedKeys.take(3).toList(); // 하위 3개
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("부족해요! 💊", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+        const SizedBox(height: 10),
+        if (lacking.isEmpty)
+          const Text("완벽해요!", style: TextStyle(fontSize: 12))
+        else
+          ...lacking.map((key) {
+            String name = _getNutrientName(key);
+            int pct = (percentages[key]! * 100).toInt();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6.0),
+              child: Row(
+                children: [
+                  Icon(Icons.arrow_downward, size: 12, color: Colors.red[300]),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text("$name ${pct}%", 
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _buildWeeklyCalendar(Map<String, double> dailyKcal) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      color: Colors.white,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: List.generate(7, (index) {
+          DateTime day = _monday.add(Duration(days: index));
+          bool isSelected = day.day == _selectedDate.day;
+          bool isToday = day.day == DateTime.now().day;
+          bool hasRecord = (dailyKcal[_getDateString(day)] ?? 0) > 0;
+
+          return GestureDetector(
+            onTap: () => setState(() => _selectedDate = day),
+            child: Column(
+              children: [
+                Text(DateFormat('E', 'ko_KR').format(day),
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                const SizedBox(height: 5),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.blue : (isToday ? Colors.blue[50] : Colors.transparent),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text("${day.day}",
+                      style: TextStyle(color: isSelected ? Colors.white : Colors.black, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                ),
+                const SizedBox(height: 4),
+                Icon(Icons.circle, size: 5, color: hasRecord ? Colors.blue[300] : Colors.transparent),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildDailyList(Map<String, double> dailyKcal) {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 7,
+      itemBuilder: (context, index) {
+        DateTime day = _monday.add(Duration(days: index));
+        String dateKey = _getDateString(day);
+        double kcal = dailyKcal[dateKey] ?? 0;
+        int stars = 0;
+        if (kcal > _rdi['kcal']! * 0.9) stars = 3;
+        else if (kcal > _rdi['kcal']! * 0.6) stars = 2;
+        else if (kcal > _rdi['kcal']! * 0.3) stars = 1;
+
+        return ListTile(
+          onTap: () {
+            setState(() {
+              _selectedDate = day;
+              _isDetailView = true;
+            });
+          },
+          leading: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+            child: Text("${day.month}/${day.day}", style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          title: Text(DateFormat('EEEE', 'ko_KR').format(day)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) => Icon(i < stars ? Icons.star : Icons.star_border, color: Colors.amber, size: 20)),
+          ),
+        );
+      },
+    );
+  }
+
+  // ==================== 2. 상세 기록 화면 (일일) ====================
+
+  Widget _buildDetailBody(List<QueryDocumentSnapshot> docs) {
+    Map<String, double> dailyTotal = _initNutrients();
+    Map<String, List<Map<String, dynamic>>> meals = {
+      'breakfast': [], 'lunch': [], 'dinner': []
+    };
+
+    for (var doc in docs) {
+      var data = doc.data() as Map<String, dynamic>;
+      data['id'] = doc.id;
+      
+      String type = data['mealType'] ?? 'breakfast';
+      if (meals.containsKey(type)) meals[type]?.add(data);
+
+      dailyTotal.forEach((key, val) {
+        dailyTotal[key] = val + (double.tryParse(data[key]?.toString() ?? "0") ?? 0.0);
+      });
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          _buildNutrientDashboard(dailyTotal),
+          const SizedBox(height: 30),
+          _buildMealSection("아침", "breakfast", meals['breakfast']!),
+          const SizedBox(height: 30),
+          _buildMealSection("점심", "lunch", meals['lunch']!),
+          const SizedBox(height: 30),
+          _buildMealSection("저녁", "dinner", meals['dinner']!),
+          const SizedBox(height: 50),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNutrientDashboard(Map<String, double> total) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10)],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("오늘의 영양 섭취", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text("${total['kcal']!.toInt()} / ${_rdi['kcal']!.toInt()} kcal", 
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+            ],
+          ),
+          const SizedBox(height: 15),
+          const Divider(),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: _buildMacroNutrientCircle("탄수화물", total['carbo']!, _rdi['carbo']!, Colors.purple)),
+              Expanded(child: _buildMacroNutrientCircle("단백질", total['protein']!, _rdi['protein']!, Colors.blue)),
+              Expanded(child: _buildMacroNutrientCircle("지방", total['fat']!, _rdi['fat']!, Colors.orange)),
+            ],
+          ),
+          const SizedBox(height: 20),
+          _buildMicroNutrientBar("비타민 C", total['vit_c']!, _rdi['vit_c']!, "mg"),
+          _buildMicroNutrientBar("나트륨", total['sodium']!, _rdi['sodium']!, "mg", isLimit: true),
+          _buildMicroNutrientBar("콜레스테롤", total['cholesterol']!, _rdi['cholesterol']!, "mg", isLimit: true),
+          _buildMicroNutrientBar("트랜스지방", total['trans_fat']!, 2.0, "g", isLimit: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMealSection(String label, String mealKey, List<Map<String, dynamic>> mealLogs) {
+    double mCarbo = 0, mProtein = 0, mFat = 0;
+    for (var log in mealLogs) {
+      mCarbo += (log['carbo'] ?? 0);
+      mProtein += (log['protein'] ?? 0);
+      mFat += (log['fat'] ?? 0);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              // ★ [수정] 사진 입력칸 크기 조정 (flex 2)
+              Expanded(
+                flex: 2,
+                child: GestureDetector(
+                  onTap: () => _pickImage(mealKey),
+                  child: Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(15),
+                      image: _tempMemoImage[mealKey]!['image'] != "" 
+                          ? DecorationImage(image: FileImage(File(_tempMemoImage[mealKey]!['image']!)), fit: BoxFit.cover)
+                          : null,
+                    ),
+                    child: _tempMemoImage[mealKey]!['image'] == ""
+                        ? const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [Icon(Icons.camera_alt, color: Colors.grey), Text("사진 추가", style: TextStyle(fontSize: 10, color: Colors.grey))],
+                          )
+                        : null,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 15),
+              // ★ [수정] 그래프 칸 크기 조정 (flex 5)
+              Expanded(
+                flex: 5,
+                child: Container(
+                  height: 120,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildMiniBar("탄수화물", mCarbo, Colors.purple),
+                      const SizedBox(height: 8),
+                      _buildMiniBar("단백질", mProtein, Colors.blue),
+                      const SizedBox(height: 8),
+                      _buildMiniBar("지방", mFat, Colors.orange),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 15),
+          if (mealLogs.isNotEmpty)
+            Column(
+              children: mealLogs.map((log) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  title: Text(log['foodName'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text("${log['kcal']} kcal"),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                    onPressed: () => _deleteLog(log['id']),
+                  ),
+                ),
+              )).toList(),
+            ),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showInputModal(mealKey),
+              icon: const Icon(Icons.add),
+              label: const Text("음식 추가하기"),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            onChanged: (val) {
+              _tempMemoImage[mealKey]!['memo'] = val;
+            },
+            decoration: InputDecoration(
+              hintText: "$label 식사 메모...",
+              filled: true,
+              fillColor: Colors.grey[50],
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, double> _initNutrients() {
+    return {
+      'kcal': 0, 'carbo': 0, 'protein': 0, 'fat': 0,
+      'vit_c': 0, 'calcium': 0, 'sodium': 0, 'cholesterol': 0, 'trans_fat': 0
+    };
+  }
+
+  String _getNutrientName(String key) {
+    switch(key) {
+      case 'carbo': return '탄수화물';
+      case 'protein': return '단백질';
+      case 'fat': return '지방';
+      case 'vit_c': return '비타민C';
+      case 'calcium': return '칼슘';
+      case 'sodium': return '나트륨';
+      case 'cholesterol': return '콜레스테롤';
+      case 'trans_fat': return '트랜스지방';
+      default: return key;
+    }
+  }
+  
+  Widget _buildMacroNutrientCircle(String label, double current, double goal, Color color) {
+    double percent = goal == 0 ? 0 : (current / goal).clamp(0.0, 1.0);
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 50, height: 50,
+              child: CircularProgressIndicator(value: percent, color: color, backgroundColor: Colors.grey[200], strokeWidth: 5),
+            ),
+            Text("${(percent * 100).toInt()}%", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        const SizedBox(height: 5),
+        Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+        Text("${current.toInt()}g", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ],
+    );
+  }
+
+  Widget _buildMicroNutrientBar(String label, double current, double goal, String unit, {bool isLimit = false}) {
+    double percent = goal == 0 ? 0 : (current / goal).clamp(0.0, 1.0);
+    Color barColor = isLimit && percent >= 1.0 ? Colors.red : Colors.green;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Row(
+        children: [
+          SizedBox(width: 70, child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+          Expanded(
+            child: LinearProgressIndicator(value: percent, color: barColor, backgroundColor: Colors.grey[200], minHeight: 6, borderRadius: BorderRadius.circular(3)),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(width: 60, child: Text("${current.toInt()}/${goal.toInt()}$unit", style: const TextStyle(fontSize: 10), textAlign: TextAlign.end)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniBar(String label, double val, Color color) {
+    return Row(
+      children: [
+        // ★ [수정] 텍스트 길이 확보 (40 -> 50)
+        SizedBox(width: 50, child: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+        Expanded(
+          child: LinearProgressIndicator(value: (val / 100).clamp(0.0, 1.0), color: color, backgroundColor: Colors.grey[100], minHeight: 6, borderRadius: BorderRadius.circular(3)),
+        ),
+        const SizedBox(width: 5),
+        Text("${val.toInt()}g", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ],
+    );
+  }
+
+  void _showInputModal(String mealKey) {
+    TextEditingController searchCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
+              child: SizedBox(
+                height: 500,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("음식 추가", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: searchCtrl,
+                      decoration: InputDecoration(
+                        hintText: "음식 검색 (예: 김밥)",
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onChanged: (val) => setModalState(() {}),
+                    ),
+                    const SizedBox(height: 15),
+                    if (searchCtrl.text.isEmpty) ...[
+                      const Text("즐겨찾기", style: TextStyle(color: Colors.grey)),
+                      Wrap(
+                        spacing: 8,
+                        children: _favorites.map((food) => ActionChip(
+                          label: Text(food),
+                          backgroundColor: Colors.amber[50],
+                          onPressed: () {
+                            searchCtrl.text = food;
+                            setModalState(() {});
+                          },
+                        )).toList(),
+                      ),
+                    ],
+                    Expanded(
+                      child: searchCtrl.text.isNotEmpty 
+                        ? _buildSearchResults(searchCtrl.text, mealKey) 
+                        : const Center(child: Text("음식을 검색하거나 즐겨찾기를 선택하세요.")),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildSearchResults(String query, String mealKey) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('foods')
+          .where('name', isGreaterThanOrEqualTo: query)
+          .where('name', isLessThan: '$query\uf8ff')
+          .limit(20)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        var docs = snapshot.data!.docs;
+        if (docs.isEmpty) return const Center(child: Text("검색 결과가 없습니다."));
+
+        return ListView.separated(
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const Divider(),
+          itemBuilder: (context, index) {
+            var data = docs[index].data() as Map<String, dynamic>;
+            return ListTile(
+              title: Text(data['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text("${data['kcal']} kcal"),
+              trailing: const Icon(Icons.add, color: Colors.blue),
+              onTap: () {
+                _addFoodLog(mealKey, data);
+                Navigator.pop(context);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _addFoodLog(String mealType, Map<String, dynamic> foodData) async {
+    await FirebaseFirestore.instance.collection('diet_logs').add({
+      'date': _selectedDateString, 
+      'mealType': mealType,
+      'foodName': foodData['name'],
+      'kcal': foodData['kcal'] ?? 0,
+      'carbo': foodData['carbo'] ?? 0,
+      'protein': foodData['protein'] ?? 0,
+      'fat': foodData['fat'] ?? 0,
+      'vit_c': foodData['vit_c'] ?? 0,
+      'calcium': foodData['calcium'] ?? 0,
+      'sodium': foodData['sodium'] ?? 0,
+      'cholesterol': foodData['cholesterol'] ?? 0,
+      'trans_fat': foodData['trans_fat'] ?? 0,
+      'timestamp': DateTime.now(),
+    });
+  }
+
+  Future<void> _deleteLog(String? docId) async {
+    if (docId != null) {
+      await FirebaseFirestore.instance.collection('diet_logs').doc(docId).delete();
+    }
+  }
+
+  Future<void> _pickImage(String mealKey) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _tempMemoImage[mealKey]!['image'] = pickedFile.path;
+      });
+    }
+  }
+
+  void _saveMemoAndImage() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("저장 완료! (메모/사진은 현재 세션에만 유지됩니다)")));
   }
 }

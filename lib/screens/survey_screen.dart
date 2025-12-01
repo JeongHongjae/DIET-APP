@@ -1,7 +1,13 @@
+// lib/screens/survey_screen.dart
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'character_creation_screen.dart'; // 캐릭터 생성 화면으로 연결
+import 'package:provider/provider.dart';
+// ★ 아래 파일들이 내 프로젝트에 진짜 있는지 꼭 확인하세요!
+import '../providers/survey_provider.dart';
+import '../models/survey_question_model.dart';
+import 'result_screen.dart'; // 같은 screens 폴더에 있어야 함
+import '../widgets/question_widget.dart';
 
+// ★ 클래스 이름을 SurveyScreen으로 통일했습니다.
 class SurveyScreen extends StatefulWidget {
   const SurveyScreen({super.key});
 
@@ -10,113 +16,182 @@ class SurveyScreen extends StatefulWidget {
 }
 
 class _SurveyScreenState extends State<SurveyScreen> {
-  // 질문 1: 요리할 시간이 있나요?
-  bool hasTime = false;
-  // 질문 2: 한 끼 예산이 5천원 넘나요?
-  bool hasMoney = false;
+  final PageController _pageController = PageController();
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("나만의 식습관 찾기")),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Q1. 평소 요리할 시간이 충분한가요?",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _buildOption("네, 여유로워요", true, hasTime, (v) => setState(() => hasTime = v)),
-                const SizedBox(width: 10),
-                _buildOption("아니요, 바빠요", false, hasTime, (v) => setState(() => hasTime = v)),
-              ],
-            ),
-            const SizedBox(height: 30),
-            const Text("Q2. 한 끼 식사 예산은 어느 정도인가요?",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _buildOption("5천원 이상", true, hasMoney, (v) => setState(() => hasMoney = v)),
-                const SizedBox(width: 10),
-                _buildOption("5천원 미만 (절약)", false, hasMoney, (v) => setState(() => hasMoney = v)),
-              ],
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: () {
-                  _analyzePersona();
-                },
-                child: const Text("결과 분석하기", style: TextStyle(fontSize: 18)),
-              ),
-            )
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('식습관 자가진단'),
+        centerTitle: true,
       ),
-    );
-  }
-
-  Widget _buildOption(String text, bool value, bool groupValue, Function(bool) onTap) {
-    bool isSelected = (value == groupValue);
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => onTap(value),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.blue : Colors.grey[200],
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: isSelected ? Colors.blue : Colors.grey),
-          ),
-          child: Center(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: isSelected ? Colors.white : Colors.black,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _analyzePersona() async {
-    String result = "";
-    if (hasTime && hasMoney) result = "건강한 미식가";
-    else if (hasTime && !hasMoney) result = "알뜰한 요리사";
-    else if (!hasTime && hasMoney) result = "배달음식 VIP";
-    else result = "편의점 마스터";
-
-    // 팝업으로 결과 보여주고 -> 캐릭터 생성 화면으로 이동
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("분석 완료!"),
-        content: Text("당신은 [$result] 입니다!", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context); // 팝업 닫기
-              
-              // 캐릭터 생성 화면으로 이동 (페르소나 전달)
-              Navigator.push(
-                context,
+      // ★ 여기서 SurveyProvider를 씁니다. main.dart에 등록 안 하면 에러 남!
+      body: Consumer<SurveyProvider>(
+        builder: (context, surveyProvider, child) {
+          // 설문이 완료되면 결과 화면으로 이동
+          if (surveyProvider.isCompleted) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              Navigator.of(context).pushReplacement(
                 MaterialPageRoute(
-                  builder: (context) => CharacterCreationScreen(persona: result),
+                  builder: (context) => ResultScreen(
+                    score: surveyProvider.calculateScore(),
+                    personaType: surveyProvider.determinePersonaType(),
+                  ),
                 ),
               );
+            });
+          }
+
+          return Column(
+            children: [
+              // 진행률 표시
+              _buildProgressIndicator(surveyProvider),
+              
+              // 질문 페이지뷰
+              Expanded(
+                child: PageView.builder(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: surveyProvider.totalQuestions,
+                  itemBuilder: (context, index) {
+                    final question = surveyProvider.questions[index];
+                    return _buildQuestionPage(question, surveyProvider);
+                  },
+                ),
+              ),
+
+              // 네비게이션 버튼
+              _buildNavigationButtons(surveyProvider),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 진행률 표시
+  Widget _buildProgressIndicator(SurveyProvider provider) {
+    final progress = (provider.currentPageIndex + 1) / provider.totalQuestions;
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${provider.currentPageIndex + 1} / ${provider.totalQuestions}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              Text(
+                '${(progress * 100).toInt()}%',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: progress,
+            backgroundColor: Colors.grey[200],
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 질문 페이지 빌드
+  Widget _buildQuestionPage(
+    SurveyQuestion question,
+    SurveyProvider provider,
+  ) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 20),
+          Text(
+            question.question,
+            style: Theme.of(context).textTheme.headlineSmall, // 스타일 살짝 수정
+          ),
+          const SizedBox(height: 32),
+          // ★ QuestionWidget이 있어야 함
+          QuestionWidget(
+            question: question,
+            initialAnswer: provider.getAnswer(question.id),
+            onAnswerChanged: (answer) {
+              provider.setAnswer(question.id, answer);
             },
-            child: const Text("캐릭터 만들러 가기"),
-          )
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 네비게이션 버튼
+  Widget _buildNavigationButtons(SurveyProvider provider) {
+    final isFirstPage = provider.currentPageIndex == 0;
+    final isLastPage = provider.currentPageIndex == provider.totalQuestions - 1;
+    final currentQuestion = provider.getCurrentQuestion();
+    final hasAnswer = currentQuestion != null &&
+        provider.getAnswer(currentQuestion.id) != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          if (!isFirstPage)
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  provider.previousPage();
+                  _pageController.previousPage(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                },
+                child: const Text('이전'),
+              ),
+            ),
+          if (!isFirstPage) const SizedBox(width: 12),
+          Expanded(
+            flex: isFirstPage ? 1 : 2,
+            child: ElevatedButton(
+              onPressed: hasAnswer
+                  ? () {
+                      if (isLastPage) {
+                        provider.completeSurvey();
+                      } else {
+                        provider.nextPage();
+                        _pageController.nextPage(
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      }
+                    }
+                  : null,
+              child: Text(isLastPage ? '완료' : '다음'),
+            ),
+          ),
         ],
       ),
     );
