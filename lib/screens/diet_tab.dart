@@ -16,7 +16,7 @@ class _DietTabState extends State<DietTab> {
   DateTime _selectedDate = DateTime.now();
   bool _isDetailView = false; // true: 상세(일일), false: 요약(주간)
 
-  final List<String> _favorites = ["닭가슴살", "현미밥", "아메리카노", "사과", "계란후라이"];
+  final List<String> _favorites = ["현미밥", "달걀"];
 
   // 일일 권장 섭취량 (20대 평균 기준)
   final Map<String, double> _rdi = {
