@@ -1,63 +1,78 @@
-// lib/providers/user_provider.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UserProvider with ChangeNotifier {
-  String name = "";
-  String gender = "M";
-  String persona = "";
-  int point = 0;
-  
-  // 데이터가 있는지 확인하는 플래그
-  bool isInitialized = false; 
+  String _name = "";
+  String _gender = "M";
+  String _persona = "";
+  int _point = 0;
+  bool _isInitialized = false; // 데이터 로드 여부
 
-  // [1] 정보 저장 (앱 껐다 켜도 유지되도록)
-  Future<void> saveUserInfo(String inputName, String inputGender, String inputPersona) async {
+  // 데이터 가져오기 (Getters)
+  String get name => _name;
+  String get gender => _gender;
+  String get persona => _persona;
+  int get point => _point;
+  bool get isInitialized => _isInitialized;
+
+  // 생성자: 앱 시작 시 자동으로 데이터 불러오기 시도
+  UserProvider() {
+    loadUserInfo();
+  }
+
+  // [1] 정보 저장 (캐릭터 생성 시 호출)
+  Future<void> setUserInfo(String inputName, String inputGender, String inputPersona) async {
+    _name = inputName;
+    _gender = inputGender;
+    _persona = inputPersona;
+    _isInitialized = true;
+    notifyListeners(); // 화면 즉시 갱신
+
+    // 디스크에 영구 저장
     final prefs = await SharedPreferences.getInstance();
-    
-    // 변수 업데이트
-    name = inputName;
-    gender = inputGender;
-    persona = inputPersona;
-    isInitialized = true;
-
-    // 디스크에 저장
     await prefs.setString('user_name', inputName);
     await prefs.setString('user_gender', inputGender);
     await prefs.setString('user_persona', inputPersona);
-    await prefs.setInt('user_point', point);
-    await prefs.setBool('is_setup_complete', true); // "가입 완료함" 도장 쾅!
-    
-    notifyListeners();
+    await prefs.setInt('user_point', _point);
+    await prefs.setBool('is_setup_complete', true);
   }
 
-  // [2] 정보 불러오기 (앱 켤 때 실행)
-  Future<bool> loadUserInfo() async {
+  // [2] 포인트 추가 및 저장 (식단 기록 시 호출)
+  Future<void> addPoint(int amount) async {
+    _point += amount;
+    notifyListeners(); // 화면 즉시 갱신
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('user_point', _point); // 변경된 포인트 저장
+  }
+
+  // [3] 정보 불러오기 (앱 켤 때 실행)
+  Future<void> loadUserInfo() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 저장된 데이터가 없으면 false 반환
     if (!prefs.containsKey('is_setup_complete')) {
-      return false; 
+      return; // 저장된 데이터 없음
     }
 
-    // 데이터 불러와서 변수에 넣기
-    name = prefs.getString('user_name') ?? "";
-    gender = prefs.getString('user_gender') ?? "M";
-    persona = prefs.getString('user_persona') ?? "";
-    point = prefs.getInt('user_point') ?? 0;
-    isInitialized = true;
+    _name = prefs.getString('user_name') ?? "";
+    _gender = prefs.getString('user_gender') ?? "M";
+    _persona = prefs.getString('user_persona') ?? "";
+    _point = prefs.getInt('user_point') ?? 0;
+    _isInitialized = true;
 
     notifyListeners();
-    return true; // 불러오기 성공
   }
 
-  // [3] 로그아웃 (데이터 초기화 - 테스트용)
+  // [4] 로그아웃/초기화 (테스트용)
   Future<void> clearUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear(); // 저장소 싹 비우기
-    name = "";
-    persona = "";
-    isInitialized = false;
+    _name = "";
+    _gender = "M";
+    _persona = "";
+    _point = 0;
+    _isInitialized = false;
     notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
   }
 }

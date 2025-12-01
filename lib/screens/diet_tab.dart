@@ -16,7 +16,7 @@ class _DietTabState extends State<DietTab> {
   DateTime _selectedDate = DateTime.now();
   bool _isDetailView = false; 
 
-  final List<String> _favorites = ["닭가슴살", "현미밥", "아메리카노", "사과", "계란후라이"];
+  final List<String> _favorites = ["현미밥", "달걀부침", "덮밥", "깍두기", "라면"];
 
   // ★ [수정] 콜레스테롤 삭제 및 기준치 업데이트
   final Map<String, double> _rdi = {
@@ -602,6 +602,11 @@ class _DietTabState extends State<DietTab> {
   Widget _buildMicroNutrientBar(String label, double current, double goal, String unit, {bool isLimit = false}) {
     double percent = goal == 0 ? 0 : (current / goal).clamp(0.0, 1.0);
     Color barColor = isLimit && percent >= 1.0 ? Colors.red : Colors.green;
+    
+    // 작은 숫자(10 미만)는 소수점 1자리까지 표시
+    String currentStr = goal < 10 ? current.toStringAsFixed(1) : current.toInt().toString();
+    String goalStr = goal < 10 ? goal.toStringAsFixed(1) : goal.toInt().toString();
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 6.0),
       child: Row(
@@ -611,7 +616,10 @@ class _DietTabState extends State<DietTab> {
             child: LinearProgressIndicator(value: percent, color: barColor, backgroundColor: Colors.grey[200], minHeight: 6, borderRadius: BorderRadius.circular(3)),
           ),
           const SizedBox(width: 10),
-          SizedBox(width: 60, child: Text("${current.toInt()}/${goal.toInt()}$unit", style: const TextStyle(fontSize: 10), textAlign: TextAlign.end)),
+          SizedBox(
+            width: 60, 
+            child: Text("$currentStr/$goalStr$unit", style: TextStyle(fontSize: 10, color: isLimit && percent >= 1.0 ? Colors.red : Colors.grey), textAlign: TextAlign.end)
+          ),
         ],
       ),
     );

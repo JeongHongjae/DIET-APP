@@ -9,6 +9,7 @@ import 'providers/survey_provider.dart';
 import 'providers/nutrition_provider.dart';
 import 'providers/party_provider.dart';
 import 'providers/character_provider.dart';
+import 'screens/admin_data_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,4 +41,4 @@ class MyApp extends StatelessWidget {
       home: const LandingScreen(), // [수정] SurveyScreen -> LandingScreen으로 변경
     );
   }
-  }
+}

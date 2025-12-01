@@ -47,9 +47,9 @@ class _HomeTabState extends State<HomeTab> {
           Map<String, double> nutrientSum = {
             'sodium': 0, 'carbo': 0, 'trans_fat': 0, 'kcal': 0, 'fat': 0
           };
-          bool hadBreakfast = false; // 아침 식사 여부
           bool hadLunch = false;
           bool hadDinner = false;
+          bool hadBreakfast = false; // 아침 추가
 
           for (var doc in docs) {
             var data = doc.data() as Map<String, dynamic>;
@@ -71,27 +71,21 @@ class _HomeTabState extends State<HomeTab> {
           
           int hour = DateTime.now().hour;
 
-          // 1순위: 아픔
           if (nutrientSum['sodium']! > limitSodium) {
             charState = "sick";
             stateMessage = "으악! 너무 짜게 먹었어요... 몸이 부었어요 🤢";
-          } 
-          // 2순위: 뚱뚱보
-          else if (nutrientSum['fat']! > limitFat || nutrientSum['trans_fat']! > limitTransFat) {
+          } else if (nutrientSum['fat']! > limitFat || nutrientSum['trans_fat']! > limitTransFat) {
             charState = "obese";
             stateMessage = "기름진 음식을 너무 많이 먹었어요... 몸이 무거워요 🐷";
-          } 
-          // 3순위: 배고픔 (아침, 점심, 저녁 체크 추가)
-          else if (
-            (hour >= 10 && !hadBreakfast) || // 10시 지났는데 아침 안 먹음
-            (hour >= 13 && !hadLunch) ||     // 13시 지났는데 점심 안 먹음
-            (hour >= 20 && !hadDinner)       // 20시 지났는데 저녁 안 먹음
+          } else if (
+            (hour >= 10 && !hadBreakfast) || 
+            (hour >= 13 && !hadLunch) ||     
+            (hour >= 20 && !hadDinner)       
           ) {
             charState = "hungry";
             stateMessage = "배고파요... 밥 언제 주나요? 🤤";
           }
 
-          // 위험도 계산
           double hbpRisk = (nutrientSum['sodium']! / limitSodium).clamp(0.0, 1.0);
           double diabetesRisk = (nutrientSum['carbo']! / limitCarbo).clamp(0.0, 1.0);
           double obesityRisk = (nutrientSum['fat']! / limitFat).clamp(0.0, 1.0);
@@ -100,73 +94,72 @@ class _HomeTabState extends State<HomeTab> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // 1. 캐릭터 영역
+                // 1. 캐릭터 영역 (스크롤 가능하도록 수정)
                 Expanded(
                   flex: 3,
                   child: Center(
-                    // ★ [수정 핵심] Stack을 감싸는 Container에 크기를 지정해서 터치 영역 확보
-                    child: SizedBox(
-                      width: 340, // 넉넉한 너비 (버튼이 들어갈 공간 확보)
-                      child: Stack(
-                        alignment: Alignment.center,
-                        // clipBehavior: Clip.none, // 이제 안 써도 됨 (영역을 넓혔으므로)
-                        children: [
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              // 실제 이미지 표시 함수 호출
-                              _buildRealCharacterImage(user.gender, charState),
-                              
-                              const SizedBox(height: 20),
-                              Text(
-                                user.name.isEmpty ? "이름없음" : user.name,
-                                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: _getStateColor(charState).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(15),
-                                  border: Border.all(color: _getStateColor(charState)),
-                                ),
-                                child: Text(
-                                  stateMessage,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          // ★ [수정] 포인트샵 버튼 위치 조정 (박스 안쪽 오른쪽 끝으로)
-                          Positioned(
-                            right: 0, // 오른쪽 끝에 딱 붙임 (잘리지 않음)
-                            bottom: 80, // 높이 조정
-                            child: Column(
+                    // ★ [수정] SingleChildScrollView로 감싸서 오버플로우 방지
+                    child: SingleChildScrollView(
+                      child: SizedBox(
+                        width: 340, 
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                FloatingActionButton(
-                                  heroTag: "shopBtn", // 태그 추가 (에러 방지)
-                                  onPressed: () {
-                                    // 페이지 이동
-                                    Navigator.push(context, MaterialPageRoute(builder: (context) => const WardrobeScreen()));
-                                  },
-                                  backgroundColor: Colors.white,
-                                  elevation: 4,
-                                  child: const Icon(Icons.checkroom, color: Colors.purple, size: 28),
+                                _buildRealCharacterImage(user.gender, charState),
+                                
+                                const SizedBox(height: 20),
+                                Text(
+                                  user.name.isEmpty ? "이름없음" : user.name,
+                                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                                 ),
-                                const SizedBox(height: 5),
-                                const Text("포인트샵", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: _getStateColor(charState).withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(15),
+                                    border: Border.all(color: _getStateColor(charState)),
+                                  ),
+                                  child: Text(
+                                    stateMessage,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                        ],
+
+                            // 포인트샵 버튼
+                            Positioned(
+                              right: 0,
+                              bottom: 80,
+                              child: Column(
+                                children: [
+                                  FloatingActionButton(
+                                    heroTag: "shopBtn",
+                                    onPressed: () {
+                                      Navigator.push(context, MaterialPageRoute(builder: (context) => const WardrobeScreen()));
+                                    },
+                                    backgroundColor: Colors.white,
+                                    elevation: 4,
+                                    child: const Icon(Icons.checkroom, color: Colors.purple, size: 28),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  const Text("포인트샵", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // 2. 위험도 UI
+                // 2. 위험도 UI (기존 유지)
                 Expanded(
                   flex: 2,
                   child: Container(
@@ -204,7 +197,6 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  // 실제 이미지 로드 함수
   Widget _buildRealCharacterImage(String gender, String state) {
     String genderPrefix = (gender == 'M') ? 'male' : 'female';
     String imagePath = 'assets/images/${genderPrefix}_$state.png';

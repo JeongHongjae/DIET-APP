@@ -23,17 +23,22 @@ class _LandingScreenState extends State<LandingScreen> {
 
   // 저장된 유저가 있는지 확인
   Future<void> _checkUser() async {
-    // Provider의 불러오기 함수 실행
-    bool exists = await context.read<UserProvider>().loadUserInfo();
+    final provider = context.read<UserProvider>();
+    
+    // 1. 데이터 불러오기 시도 (await로 기다림)
+    await provider.loadUserInfo();
     
     if (mounted) {
       setState(() {
-        _hasUser = exists;
+        // 2. 로드된 데이터가 있는지 확인 (변수에 담는 게 아니라 provider 상태 확인)
+        _hasUser = provider.isInitialized && provider.name.isNotEmpty;
         _isLoading = false;
       });
       
-      // (선택) 만약 유저가 있으면 바로 메인으로 보내고 싶다면 아래 주석 해제
-      // if (exists) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+      // (선택) 자동 로그인 기능을 원하시면 아래 주석을 해제하세요
+      // if (_hasUser) {
+      //   Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+      // }
     }
   }
 

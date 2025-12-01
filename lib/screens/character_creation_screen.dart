@@ -1,4 +1,3 @@
-// lib/screens/character_creation_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -66,7 +65,7 @@ class _CharacterCreationScreenState extends State<CharacterCreationScreen> {
               child: ElevatedButton(
                 onPressed: _createCharacter,
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                child: const Text("시작하기", style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+                child: const Text("모험 시작하기!", style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
           ],
@@ -107,20 +106,45 @@ class _CharacterCreationScreenState extends State<CharacterCreationScreen> {
       return;
     }
 
-    // 1. 앱 내 저장소(Provider)에 저장
-    context.read<UserProvider>().saveUserInfo(name, _selectedGender, widget.persona);
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
 
-    // 2. Firebase DB에 저장
-    await FirebaseFirestore.instance.collection('users').add({
-      'name': name,
-      'gender': _selectedGender,
-      'persona': widget.persona,
-      'createdAt': DateTime.now(),
-      'point': 0,
-    });
+    try {
+      final db = FirebaseFirestore.instance;
 
-    // 3. 메인 화면으로 이동 (뒤로가기 못하게 pushReplacement)
-    if (!mounted) return;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const MainScreen()));
+      // ★ [추가] 기존 식단 데이터 초기화 (Reset)
+      // 새로운 사용자가 등록되므로 이전 기록(diet_logs)을 모두 지웁니다.
+      var oldLogs = await db.collection('diet_logs').get();
+      for (var doc in oldLogs.docs) {
+        await doc.reference.delete();
+      }
+
+      // 1. 앱 내 저장소(Provider)에 저장
+      if (!mounted) return;
+      context.read<UserProvider>().setUserInfo(name, _selectedGender, widget.persona);
+
+      // 2. Firebase DB에 유저 정보 저장
+      await db.collection('users').add({
+        'name': name,
+        'gender': _selectedGender,
+        'persona': widget.persona,
+        'createdAt': DateTime.now(),
+        'point': 0,
+      });
+
+      // 3. 메인 화면으로 이동
+      if (!mounted) return;
+      Navigator.pop(context); // 로딩 닫기
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const MainScreen()));
+
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // 로딩 닫기
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("오류 발생: $e")));
+    }
   }
 }
