@@ -33,7 +33,7 @@ class SurveyQuestions {
           '기숙사',
           '원룸/오피스텔',
           '하숙/고시원',
-          '자취방',
+          '본가',
           '기타',
         ],
         order: 4,
@@ -41,15 +41,22 @@ class SurveyQuestions {
       SurveyQuestion(
         id: 'dietary_habits',
         question: '평소 식생활 및 식단 구성을 선택해주세요',
-        type: QuestionType.singleChoice,
+        type: QuestionType.multipleChoice,
         options: [
           '규칙적으로 3끼 챙겨먹음',
           '아침 결식이 많음',
           '간편식 위주',
-          '불규칙하게 먹음',
+          '불규칙한 시간에 먹음',
           '다이어트 중',
         ],
         order: 5,
+      ),
+      SurveyQuestion(
+        id: 'meals_per_day',
+        question: '하루에 보통 몇끼를 먹는지 선택해주세요',
+        type: QuestionType.singleChoice,
+        options: ['1끼', '2끼', '3끼'],
+        order: 6,
       ),
       SurveyQuestion(
         id: 'cooking_tools',
@@ -63,20 +70,20 @@ class SurveyQuestions {
           '오븐',
           '없음',
         ],
-        order: 6,
+        order: 7,
       ),
       SurveyQuestion(
         id: 'can_use_fire',
         question: '불 사용이 가능한가요?',
         type: QuestionType.boolean,
-        order: 7,
+        order: 8,
       ),
       SurveyQuestion(
         id: 'refrigerator_size',
         question: '냉장고 크기를 선택해주세요',
         type: QuestionType.singleChoice,
         options: ['소형', '중형', '대형'],
-        order: 8,
+        order: 9,
       ),
       SurveyQuestion(
         id: 'monthly_food_budget',
@@ -89,7 +96,7 @@ class SurveyQuestions {
           '30-40만원',
           '40만원 이상',
         ],
-        order: 9,
+        order: 10,
       ),
     ];
   }

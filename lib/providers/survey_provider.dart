@@ -67,89 +67,130 @@ class SurveyProvider with ChangeNotifier {
   }
 
   /// 설문 점수 계산
+  /// 만점 100점에서 시작하여 건강에 좋지 않은 선택지마다 감점
+  /// 최악의 선택지만 골랐을 경우 20점이 되도록 설정
   int calculateScore() {
-    int score = 0;
+    int score = 100; // 만점 100점에서 시작
 
-    // 각 답변에 따라 점수 부여
+    // 각 답변에 따라 점수 감점 또는 가점
     for (var entry in _answers.entries) {
       final questionId = entry.key;
       final answer = entry.value;
 
       switch (questionId) {
         case 'eating_out_frequency':
-          // 외식 빈도가 낮을수록 높은 점수
+          // 외식 빈도가 높을수록 감점 (0회: 0점 감점, 7회 이상: 13점 감점)
           final options = ['0회', '1-2회', '3-4회', '5-6회', '7회 이상'];
           final index = options.indexOf(answer.toString());
-          score += (options.length - index) * 2;
+          if (index >= 0) {
+            // 최선(0회)은 감점 없음, 최악(7회 이상)은 13점 감점
+            final penalty = (index * 13) ~/ (options.length - 1);
+            score -= penalty;
+          }
           break;
 
         case 'delivery_frequency':
-          // 배달 빈도가 낮을수록 높은 점수
+          // 배달 빈도가 높을수록 감점 (0회: 0점 감점, 7회 이상: 13점 감점)
           final options = ['0회', '1-2회', '3-4회', '5-6회', '7회 이상'];
           final index = options.indexOf(answer.toString());
-          score += (options.length - index) * 2;
+          if (index >= 0) {
+            // 최선(0회)은 감점 없음, 최악(7회 이상)은 13점 감점
+            final penalty = (index * 13) ~/ (options.length - 1);
+            score -= penalty;
+          }
           break;
 
         case 'dietary_habits':
-          // 규칙적인 식사가 높은 점수
-          if (answer == '규칙적으로 3끼 챙겨먹음') {
-            score += 10;
-          } else if (answer == '아침 결식이 많음') {
-            score += 5;
-          } else if (answer == '간편식 위주') {
-            score += 3;
-          } else if (answer == '불규칙하게 먹음') {
-            score += 2;
+          // 식습관에 따라 감점 (다중 선택 가능)
+          if (answer is List) {
+            // 선택된 항목들에 대해 각각 감점 적용
+            for (var habit in answer) {
+              if (habit == '규칙적으로 3끼 챙겨먹음') {
+                // 최선: 감점 없음 (0점 감점)
+              } else if (habit == '아침 결식이 많음') {
+                score -= 10; // 5점 감점
+              } else if (habit == '간편식 위주') {
+                score -= 10; // 10점 감점
+              } else if (habit == '불규칙한 시간에 먹음') {
+                score -= 10; // 최악: 20점 감점
+              } else if (habit == '다이어트 중') {
+                score -= 10; // 10점 감점
+              }
+            }
+          } else {
+            // 단일 선택인 경우 (하위 호환성)
+            if (answer == '규칙적으로 3끼 챙겨먹음') {
+              // 최선: 감점 없음
+            } else if (answer == '아침 결식이 많음') {
+              score -= 10;
+            } else if (answer == '간편식 위주') {
+              score -= 10;
+            } else if (answer == '불규칙한 시간에 먹음') {
+              score -= 10;
+            } else if (answer == '다이어트 중') {
+              score -= 10;
+            }
+          }
+          break;
+
+        case 'meals_per_day':
+          // 하루 식사 횟수에 따라 감점
+          if (answer == '3끼') {
+            // 최선: 감점 없음
+          } else if (answer == '2끼') {
+            score -= 5; // 5점 감점
+          } else if (answer == '1끼') {
+            score -= 11; // 최악: 11점 감점
           }
           break;
 
         case 'cooking_tools':
-          // 조리도구가 많을수록 높은 점수
+          // 조리도구가 없을수록 감점
           if (answer is List) {
-            score += answer.length * 2;
+            if (answer.isEmpty || answer.contains('없음')) {
+              score -= 9; // 최악: 조리도구 없음 9점 감점
+            } else {
+              // 조리도구가 많을수록 좋지만, 감점은 하지 않음 (기본 점수 유지)
+              // 조리도구가 있으면 추가 감점 없음
+            }
           }
           break;
 
         case 'can_use_fire':
-          // 불 사용 가능하면 높은 점수
-          if (answer == true) {
-            score += 5;
+          // 불 사용 불가능하면 감점
+          if (answer == false) {
+            score -= 5; // 5점 감점
           }
+          // 불 사용 가능하면 감점 없음
           break;
 
         case 'refrigerator_size':
-          // 냉장고가 클수록 높은 점수
-          if (answer == '대형') {
-            score += 5;
+          // 냉장고가 작을수록 감점
+          if (answer == '소형') {
+            score -= 9; // 최악: 9점 감점
           } else if (answer == '중형') {
-            score += 3;
-          } else if (answer == '소형') {
-            score += 1;
+            score -= 5; // 5점 감점
           }
+          // 대형은 감점 없음
           break;
       }
     }
 
-    return score;
+    // 점수는 0점 이하로 내려가지 않도록 제한
+    return score.clamp(0, 100);
   }
 
   /// 페르소나 유형 결정
   String determinePersonaType() {
     final score = calculateScore();
-    final occupation = _answers['occupation']?.toString() ?? '';
-    final budget = _answers['monthly_food_budget']?.toString() ?? '';
 
-    // 점수와 상황에 따라 페르소나 결정
-    if (score >= 40) {
+    // 점수에 따라 페르소나 결정
+    if (score >= 70) {
       return '건강한 식습관 유지형';
-    } else if (score >= 25) {
+    } else if (score >= 40) {
       return '개선 가능형';
-    } else if (occupation.contains('대학') && budget.contains('10-20') || budget.contains('10만원 미만')) {
-      return '가성비 추구형';
-    } else if (score < 15) {
-      return '개선 필요형';
     } else {
-      return '일반형';
+      return '개선 필요형';
     }
   }
 
@@ -158,10 +199,7 @@ class SurveyProvider with ChangeNotifier {
     return SurveyResult(
       userId: userId,
       responses: _answers.entries.map((entry) {
-        return SurveyResponse(
-          questionId: entry.key,
-          answer: entry.value,
-        );
+        return SurveyResponse(questionId: entry.key, answer: entry.value);
       }).toList(),
       completedAt: DateTime.now(),
       personaType: determinePersonaType(),
